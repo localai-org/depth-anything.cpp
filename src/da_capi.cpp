@@ -1,7 +1,9 @@
 #include "da_capi.h"
 #include "engine.hpp"
 #include "depth_upscale.hpp"
+#ifdef DA_ENABLE_TIFF
 #include "tiff_io.hpp"
+#endif
 #include "preprocess.hpp"
 #include "image_io.hpp"
 #include "glb_export.hpp"
@@ -164,9 +166,18 @@ int da_capi_depth_upscale(da_ctx* c, const char* image_path,
         const bool is_tiff = lower.size() >= 4 &&
             (lower.compare(lower.size() - 4, 4, ".tif") == 0 ||
              (lower.size() >= 5 && lower.compare(lower.size() - 5, 5, ".tiff") == 0));
-        if (is_tiff ? !da::load_tiff_rgb(path, image, &error) : !da::load_image_rgb(path, image)){
+        if (is_tiff) {
+#ifdef DA_ENABLE_TIFF
+            if (!da::load_tiff_rgb(path, image, &error)) {
+                c->last_error = "depth_upscale: load image failed: " + error;
+                return -1;
+            }
+#else
+            c->last_error = "depth_upscale: TIFF input requires a build with -DDA_ENABLE_TIFF=ON";
+            return -1;
+#endif
+        } else if (!da::load_image_rgb(path, image)) {
             c->last_error = "depth_upscale: load image failed";
-            if (!error.empty()) c->last_error += ": " + error;
             return -1;
         }
         std::vector<float> predicted;

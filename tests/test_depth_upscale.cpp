@@ -1,8 +1,9 @@
 #include "depth_upscale.hpp"
-#include "tiff_io.hpp"
 #include "da_capi.h"
-
+#ifdef DA_ENABLE_TIFF
+#include "tiff_io.hpp"
 #include <tiffio.h>
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -17,6 +18,7 @@ static void check(bool ok, const char* message) {
     if (!ok) ++failures;
 }
 
+#ifdef DA_ENABLE_TIFF
 static std::string temporary_path(const char* suffix) {
     return std::string("/tmp/da-depth-upscale-") + std::to_string(getpid()) + suffix;
 }
@@ -62,6 +64,8 @@ static bool write_rgb_fixture(const std::string& path) {
     TIFFClose(tiff);
     return written;
 }
+#endif
+
 int main() {
 
     check(da_capi_abi_version() == 12, "reports C API version 12");
@@ -95,6 +99,14 @@ int main() {
     check(monotonic, "preserves relative-depth ordering after calibration");
     check(!upscale_depth_map(sensor, h, w, std::vector<float>(h * w, 1), h, w, output, options, &error),
           "rejects degenerate predictor");
+
+    std::vector<uint16_t> zero_sensor {1000, 2000, 3000};
+    std::vector<float> zero_relative {1.0f, 2.0f, 3.0f};
+    options.degree = 2;
+    check(upscale_depth_map(zero_sensor, 1, 3, zero_relative, 1, 3, output, options, &error),
+          "fits normalized zero-valued predictor samples");
+    check(output == zero_sensor, "calibrates the full normalized predictor range");
+
     // The uint8 compatibility overload must retain the supplied nonzero range:
     // normalizing it first would turn 10 into zero and leave only three samples
     // for this cubic fit.
@@ -106,6 +118,7 @@ int main() {
           "preserves legacy uint8 predictor values during calibration");
     options.degree = 1;
 
+#ifdef DA_ENABLE_TIFF
     const std::string packed_path = temporary_path("-packed.tiff");
     const std::string output_path = temporary_path("-output.tiff");
     const std::string rgb_path = temporary_path("-rgb.tiff");
@@ -119,7 +132,7 @@ int main() {
     std::vector<uint16_t> loaded; int loaded_h = 0, loaded_w = 0;
     check(load_packed_depth_tiff(packed_path, loaded, loaded_h, loaded_w, &error), "reads packed sensor TIFF");
     check(loaded_h == h && loaded_w == w && loaded == sensor, "decodes big-endian two-channel sensor depth");
-    check(write_depth_tiff_u16(output_path, output, h, w, &error), "writes uint16 depth TIFF");
+    check(write_depth_tiff_u16(output_path, sensor, h, w, &error), "writes uint16 depth TIFF");
 
     TIFF* tiff = TIFFOpen(output_path.c_str(), "r");
     uint16_t bits = 0, samples = 0, format = 0;
@@ -132,6 +145,8 @@ int main() {
     std::remove(packed_path.c_str());
     std::remove(output_path.c_str());
     std::remove(rgb_path.c_str());
+#endif
+
     std::fprintf(stderr, "%s (%d failures)\n", failures ? "FAILED" : "PASSED", failures);
     return failures ? 1 : 0;
 }

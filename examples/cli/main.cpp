@@ -7,8 +7,10 @@
 #include "preprocess.hpp"
 #include "glb_export.hpp"
 #include "colmap_export.hpp"
+#ifdef DA_ENABLE_TIFF
 #include "depth_upscale.hpp"
 #include "tiff_io.hpp"
+#endif
 #include <cstdio>
 #include <algorithm>
 #include <array>
@@ -154,6 +156,7 @@ static int cmd_depth_export(const da::cli::Parsed& p, da::Engine& eng){
     if (!p.output_png.empty()) da::write_depth_png(p.output_png, depth, H, W, p.invert);
     return 0;
 }
+#ifdef DA_ENABLE_TIFF
 static int cmd_depth_upscale(const da::cli::Parsed& p){
     std::string error;
     da::Image image;
@@ -189,6 +192,7 @@ static int cmd_depth_upscale(const da::cli::Parsed& p){
                 prediction_h, p.output_depth_tiff.c_str());
     return 0;
 }
+#endif
 
 static int cmd_depth(const da::cli::Parsed& p){
     if (!p.metric_model.empty()) return cmd_depth_metric(p);
@@ -281,7 +285,13 @@ int main(int argc, char** argv){
         case S::Depth: return cmd_depth(p);
         case S::Reconstruct: return cmd_reconstruct(p);
         case S::Quantize: return cmd_quantize(p);
-        case S::DepthUpscale: return cmd_depth_upscale(p);
+        case S::DepthUpscale:
+#ifdef DA_ENABLE_TIFF
+            return cmd_depth_upscale(p);
+#else
+            std::fprintf(stderr, "error: depth-upscale requires a build with -DDA_ENABLE_TIFF=ON\n");
+            return 1;
+#endif
         case S::Help: da::cli::print_help(); return 0;
         default: da::cli::print_help(); return 1;
     }

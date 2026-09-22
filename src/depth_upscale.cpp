@@ -214,7 +214,8 @@ static bool upscale_depth_map_impl(const std::vector<uint16_t>& sensor_depth, in
     std::vector<double> rhs(coefficient_count, 0.0);
     size_t valid_count = 0;
     for (size_t i = 0; i < predictor.size(); ++i) {
-        if (sensor_depth[i] == 0 || predictor[i] <= 0.0f || !std::isfinite(predictor[i])) continue;
+        const bool missing_legacy_predictor = !normalize_relative && predictor[i] <= 0.0f;
+        if (sensor_depth[i] == 0 || missing_legacy_predictor || !std::isfinite(predictor[i])) continue;
         const double x = predictor[i] / predictor_max;
         const double y = sensor_depth[i];
         double powers[17] = {1.0};

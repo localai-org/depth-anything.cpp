@@ -74,7 +74,16 @@ def write_da2_onnx_gguf(onnx_path, output, checkpoint_name, max_depth):
     head_features = int(initializers["depth_head.scratch.layer1_rn.weight"].dims[0])
     head_out_channels = [int(initializers[f"depth_head.projects.{i}.weight"].dims[0]) for i in range(4)]
     qkv_bias = "pretrained.blocks.0.attn.qkv.bias" in initializers
-    mlp_hidden = int(initializers["pretrained.blocks.0.mlp.fc1.weight"].dims[0])
+    fc1 = initializers.get("pretrained.blocks.0.mlp.fc1.weight")
+    w12 = initializers.get("pretrained.blocks.0.mlp.w12.weight")
+    if fc1 is not None:
+        mlp_hidden = int(fc1.dims[0])
+        ffn_type = "mlp"
+    elif w12 is not None:
+        mlp_hidden = int(w12.dims[0]) // 2
+        ffn_type = "swiglu"
+    else:
+        raise ValueError("unsupported DA2 MLP tensors")
     pos_grid = math.isqrt(int(pos_embed.dims[1]) - 1)
 
     writer = gguf.GGUFWriter(output, K.ARCH)
@@ -86,7 +95,7 @@ def write_da2_onnx_gguf(onnx_path, output, checkpoint_name, max_depth):
     writer.add_uint32(K.KV["vit.num_heads"], num_heads)
     writer.add_uint32(K.KV["vit.head_dim"], embed_dim // num_heads)
     writer.add_uint32(K.KV["vit.mlp_hidden"], mlp_hidden)
-    writer.add_string(K.KV["vit.ffn_type"], "mlp")
+    writer.add_string(K.KV["vit.ffn_type"], ffn_type)
     writer.add_uint32(K.KV["vit.num_register"], 0)
     writer.add_float32(K.KV["vit.init_values"], 1.0)
     writer.add_int32(K.KV["vit.alt_start"], -1)

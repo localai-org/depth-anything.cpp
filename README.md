@@ -124,7 +124,7 @@ cmake --build build -j
 # -> build/examples/cli/da3-cli
 ```
 
-`depth-upscale` uses libtiff for TIFF decode/encode; install its development package before configuring (for example, `libtiff-dev` on Debian/Ubuntu).
+The default build has no libtiff dependency. To build the TIFF-based `depth-upscale` workflow, install libtiff's development package (for example, `libtiff-dev` on Debian/Ubuntu) and configure with `-DDA_ENABLE_TIFF=ON`.
 
 ### CMake options
 
@@ -132,6 +132,7 @@ cmake --build build -j
 |--------|---------|--------|
 | `DA_BUILD_CLI` | ON | build the `da3-cli` tool |
 | `DA_BUILD_TESTS` | OFF | build the ctest parity suite |
+| `DA_ENABLE_TIFF` | OFF | enable libtiff-backed TIFF I/O and the `depth-upscale` CLI workflow |
 | `DA_SHARED` | OFF | build `libdepthanything.so` (static ggml, PIC) for embedding |
 | `DA_GGML_LLAMAFILE` | ON | tinyBLAS AVX-512/AVX2 matmul kernels (faster CPU) |
 | `DA_GGML_CUDA` | OFF | CUDA backend (`-DCMAKE_CUDA_ARCHITECTURES=native` auto) |
@@ -213,7 +214,8 @@ $CLI depth --model models/depth-anything-mono-large-f32.gguf --input photo.jpg -
 # Nested metric-scale depth (two GGUFs)
 $CLI depth --model nested-anyview.gguf --metric-model nested-metric.gguf --input photo.jpg --pfm metric.pfm
 
-# Sensor-calibrated DA2/DA3 depth TIFF. depth-upscale defaults to the converted
+# Sensor-calibrated DA2/DA3 depth TIFF (build with -DDA_ENABLE_TIFF=ON).
+# depth-upscale defaults to the converted
 # yuvraj108c Depth Anything V2 ViT-B model at models/depth-anything2-base-f32.gguf.
 # The sensor input stores each 16-bit depth sample in its first two 8-bit channels
 # (high byte, low byte); pass --model to override the default.
@@ -280,7 +282,7 @@ da_capi_depth_upscale(ctx, "main.tiff", projected_range_mm, range_h, range_w,
 da_capi_free(ctx);
 ```
 
-Opaque handles, C types only, `da_capi_last_error` for diagnostics. Build it with `-DDA_SHARED=ON`.
+Opaque handles, C types only, `da_capi_last_error` for diagnostics. Build it with `-DDA_SHARED=ON`; add `-DDA_ENABLE_TIFF=ON` when `image_path` can be a TIFF.
 
 ---
 

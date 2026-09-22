@@ -21,6 +21,7 @@ option(DA_SHARED       "Build libdepthanything as a shared lib"   OFF)
 option(DA_GGML_CUDA    "ggml CUDA backend"                        OFF)
 option(DA_GGML_METAL   "ggml Metal backend"                       OFF)
 option(DA_GGML_VULKAN  "ggml Vulkan backend"                      OFF)
+option(DA_ENABLE_TIFF   "Enable libtiff-backed TIFF I/O"            OFF)
 
 set(GGML_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -40,8 +41,6 @@ set(GGML_VULKAN ${DA_GGML_VULKAN} CACHE BOOL "" FORCE)
 # and a GPU present at configure time, so it breaks cross/CI builds (e.g. the
 # l4t/Jetson image on CMake 3.22 yields an empty "compute_" arch). For a local
 # GPU-targeted build pass -DCMAKE_CUDA_ARCHITECTURES=native explicitly.
-find_package(TIFF REQUIRED)
-
 add_subdirectory(third_party/ggml EXCLUDE_FROM_ALL)
 
 set(DA_SOURCES
@@ -49,7 +48,6 @@ set(DA_SOURCES
     src/backend.cpp
     src/image_io.cpp
     src/preprocess.cpp
-    src/tiff_io.cpp
     src/depth_upscale.cpp
     src/rope2d.cpp
     src/uv_posembed.cpp
@@ -83,6 +81,10 @@ set(DA_SOURCES
     src/cli.cpp
     src/quantize.cpp
 )
+if(DA_ENABLE_TIFF)
+    find_package(TIFF REQUIRED)
+    list(APPEND DA_SOURCES src/tiff_io.cpp)
+endif()
 if(DA_SHARED)
     add_library(depthanything SHARED ${DA_SOURCES})
 else()
@@ -112,7 +114,10 @@ else()
     endif()
 endif()
 target_link_libraries(depthanything PUBLIC ggml)
-target_link_libraries(depthanything PUBLIC TIFF::TIFF)
+if(DA_ENABLE_TIFF)
+    target_compile_definitions(depthanything PUBLIC DA_ENABLE_TIFF=1)
+    target_link_libraries(depthanything PRIVATE TIFF::TIFF)
+endif()
 
 # OpenMP for the single-threaded CPU geometry post-processing (surface fusion,
 # per-seam ICP, normal estimation). ggml already pulls OpenMP into the toolchain;

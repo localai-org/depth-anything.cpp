@@ -11,7 +11,7 @@ void print_help(){
         "  da3-cli depth --model <gguf> --input <img> [--glb <out.glb>] [--colmap <out_dir>] [--colmap-txt <out_dir>]   (single-image 3D export)\n"
         "  da3-cli depth --model <anyview.gguf> --metric-model <metric.gguf> --input <img> [--pfm <out.pfm>]   (nested metric-scale depth)\n"
         "  da3-cli depth --model <gguf> --input a.png --input b.png [--out-prefix out] [--no-invert]   (multi-view)\n"
-        "  da3-cli depth-upscale [--model <da2-or-da3.gguf>] --input <rgb.tiff> --sensor-depth <packed-depth.tiff> --tiff <out.tiff> [--degree N] [--threads N]\n"
+        "  da3-cli depth-upscale [--model <da2-or-da3.gguf>] --input <rgb.tiff> --sensor-depth <packed-depth.tiff> --tiff <out.tiff> [--degree N] [--threads N]  (requires -DDA_ENABLE_TIFF=ON)\n"
         "  da3-cli reconstruct --model <giant.gguf> --input <img> --ply <out.ply> [--pose <out.json>]\n"
         "  da3-cli quantize <in.gguf> <out.gguf> <type>   (type: f16|q8_0|q6_k|q5_k|q4_k)\n");
 }
