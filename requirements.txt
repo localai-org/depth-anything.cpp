@@ -8,6 +8,7 @@
 torch>=2.4            # CPU build is fine: torch==2.x+cpu
 numpy>=1.26
 gguf>=0.19.0          # GGUF writer/reader
+onnx>=1.16           # scripts/convert_da2_onnx_to_gguf.py
 huggingface_hub>=0.24 # scripts/download_model.py
 safetensors>=0.4
 einops>=0.8

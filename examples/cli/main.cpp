@@ -7,6 +7,10 @@
 #include "preprocess.hpp"
 #include "glb_export.hpp"
 #include "colmap_export.hpp"
+#ifdef DA_ENABLE_TIFF
+#include "depth_upscale.hpp"
+#include "tiff_io.hpp"
+#endif
 #include <cstdio>
 #include <algorithm>
 #include <array>
@@ -152,6 +156,44 @@ static int cmd_depth_export(const da::cli::Parsed& p, da::Engine& eng){
     if (!p.output_png.empty()) da::write_depth_png(p.output_png, depth, H, W, p.invert);
     return 0;
 }
+#ifdef DA_ENABLE_TIFF
+static int cmd_depth_upscale(const da::cli::Parsed& p){
+    std::string error;
+    da::Image image;
+    if (!da::load_tiff_rgb(p.input, image, &error)){
+        std::fprintf(stderr, "error: load RGB TIFF failed: %s\n", error.c_str());
+        return 1;
+    }
+    std::vector<uint16_t> sensor_depth; int sensor_h = 0, sensor_w = 0;
+    if (!da::load_packed_depth_tiff(p.sensor_depth_tiff, sensor_depth, sensor_h, sensor_w, &error)){
+        std::fprintf(stderr, "error: load packed sensor depth TIFF failed: %s\n", error.c_str());
+        return 1;
+    }
+    auto eng = da::Engine::load(p.model, p.n_threads);
+    if (!eng){ std::fprintf(stderr, "error: load failed\n"); return 1; }
+    std::vector<float> predicted; int prediction_h = 0, prediction_w = 0;
+    if (!da::predict_depth_for_upscale(*eng, image, predicted, prediction_h, prediction_w, &error)){
+        std::fprintf(stderr, "error: model inference failed: %s\n", error.c_str());
+        return 1;
+    }
+    da::DepthUpscaleOptions options;
+    options.degree = p.upscale_degree;
+    std::vector<uint16_t> output;
+    if (!da::upscale_depth_map(sensor_depth, sensor_h, sensor_w, predicted, prediction_h, prediction_w,
+                               output, options, &error)){
+        std::fprintf(stderr, "error: depth calibration failed: %s\n", error.c_str());
+        return 1;
+    }
+    if (!da::write_depth_tiff_u16(p.output_depth_tiff, output, sensor_h, sensor_w, &error)){
+        std::fprintf(stderr, "error: write depth TIFF failed: %s\n", error.c_str());
+        return 1;
+    }
+    std::printf("upscaled depth %dx%d from model %dx%d -> %s\n", sensor_w, sensor_h, prediction_w,
+                prediction_h, p.output_depth_tiff.c_str());
+    return 0;
+}
+#endif
+
 static int cmd_depth(const da::cli::Parsed& p){
     if (!p.metric_model.empty()) return cmd_depth_metric(p);
     if (p.repeat > 0 && p.inputs.size() <= 1) return cmd_depth_bench(p);
@@ -243,6 +285,13 @@ int main(int argc, char** argv){
         case S::Depth: return cmd_depth(p);
         case S::Reconstruct: return cmd_reconstruct(p);
         case S::Quantize: return cmd_quantize(p);
+        case S::DepthUpscale:
+#ifdef DA_ENABLE_TIFF
+            return cmd_depth_upscale(p);
+#else
+            std::fprintf(stderr, "error: depth-upscale requires a build with -DDA_ENABLE_TIFF=ON\n");
+            return 1;
+#endif
         case S::Help: da::cli::print_help(); return 0;
         default: da::cli::print_help(); return 1;
     }

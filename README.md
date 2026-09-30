@@ -25,6 +25,7 @@ Given an image it recovers a dense **metric depth** map, per-pixel **confidence*
 - **Quantization** to f16 / q8_0 / q6_k / q5_k / q4_k - q4_k is **99 MB** (0.25x the f32) and near-lossless.
 - **CPU-first, GPU-ready.** Tuned CPU path (tinyBLAS, Winograd, flash-attention) plus CUDA / Metal / Vulkan ggml backends.
 - **Flat C API** (`include/da_capi.h`) - embed from C, C++, Go, or Rust. Powers the [LocalAI](#use-it-from-localai) backend.
+- **SpexAI sensor-calibrated depth.** Run DA2 or single-file DA3 on a main-camera image, fit it to projected sensor ranges, and emit calibrated uint16 millimetres.
 - **Parity-first.** Every component is gated against PyTorch-dumped reference tensors; the end-to-end depth matches the real `net()` at correlation 1.0.
 
 ---
@@ -80,6 +81,29 @@ On **GPU** (NVIDIA GB10, via `-DDA_GGML_CUDA=ON`) the ggml CUDA path with flash 
 
 ![inference speed](benchmarks/media/infer_speed.png) ![peak memory](benchmarks/media/memory.png)
 
+### SpexAI depth-upscale capacity
+
+`depth-upscale` is the SpexAI-specific capture workflow: it combines a DA2 or single-file
+DA3 prediction from an RGB TIFF with a paired sensor TIFF. The sensor image stores each uint16
+depth sample in its first two interleaved uint8 channels (high byte, then low byte); the command
+resizes and smooths the model map, polynomial-fits it to valid sensor pixels, and writes an
+uncompressed single-channel uint16 TIFF in calibrated sensor units. The library API also accepts
+a sparse range image already projected into the main camera by PointClouds, preserving its
+millimetre scale rather than stretching each result to 0..65535.
+
+Measured as one cold task on the supplied SpexAI captures (3072×2048 RGB → 1280×720 depth)
+with `depth-anything2-large-q4_k.gguf` (289.1 MiB), four CPU threads:
+
+| Device        | Wall time | Peak host RSS | Peak GPU memory |   Capacity guidance   |
+|---------------|----------:|--------------:|----------------:|-----------------------|
+| CPU           | 31.14 s   | 833.1 MiB     |              —  | 1 GiB RAM per worker  |
+| NVIDIA M2000M | **9.73 s**| **661.9 MiB** | 2,473 MiB task allocation; 2,806 MiB global peak (333 MiB baseline) | 1 GiB RAM + 3 GiB VRAM per worker; one worker on a 4 GiB card |
+| old SciPy CPU | 4.79 s    | 883.6 MiB     |                 |                       |
+
+The CUDA run (`-DDA_GGML_CUDA=ON`, `DA_DEVICE=CUDA0`) offloaded 403 weights and used
+flash attention. GPU memory was sampled every 100 ms; its ≈2.8 GiB global plateau persisted
+for several seconds. The CUDA output was validated as a 1280×720, single-channel uint16 TIFF.
+
 ### See it run
 
 Real photos through the actual CLI, input next to the colorized depth (turbo):
@@ -100,12 +124,15 @@ cmake --build build -j
 # -> build/examples/cli/da3-cli
 ```
 
+The default build has no libtiff dependency. To build the TIFF-based `depth-upscale` workflow, install libtiff's development package (for example, `libtiff-dev` on Debian/Ubuntu) and configure with `-DDA_ENABLE_TIFF=ON`.
+
 ### CMake options
 
 | Option | Default | Effect |
 |--------|---------|--------|
 | `DA_BUILD_CLI` | ON | build the `da3-cli` tool |
 | `DA_BUILD_TESTS` | OFF | build the ctest parity suite |
+| `DA_ENABLE_TIFF` | OFF | enable libtiff-backed TIFF I/O and the `depth-upscale` CLI workflow |
 | `DA_SHARED` | OFF | build `libdepthanything.so` (static ggml, PIC) for embedding |
 | `DA_GGML_LLAMAFILE` | ON | tinyBLAS AVX-512/AVX2 matmul kernels (faster CPU) |
 | `DA_GGML_CUDA` | OFF | CUDA backend (`-DCMAKE_CUDA_ARCHITECTURES=native` auto) |
@@ -141,6 +168,12 @@ python scripts/convert_nested_to_gguf.py --model models/DA3NESTED-GIANT-LARGE --
 # Depth Anything V2 — relative (encoder vits/vitb/vitl)
 python scripts/convert_da2_to_gguf.py --encoder vitl --ckpt models/depth_anything_v2_vitl.pth \
     --output models/depth-anything2-large-f32.gguf --name Depth-Anything-V2-Large
+
+# Legacy depth-upscale model: yuvraj108c's static ViT-B ONNX export.
+# This writes the depth-upscale default and needs only onnx, numpy, and gguf.
+python scripts/convert_da2_onnx_to_gguf.py \
+    --onnx ../depth-upscale/models/depth_anything_v2/1/model.onnx \
+    --output models/depth-anything2-base-f32.gguf
 
 # Depth Anything V2 — metric (add --max-depth: 20 for Hypersim/indoor, 80 for VKITTI/outdoor)
 python scripts/convert_da2_to_gguf.py --encoder vits --ckpt models/depth_anything_v2_metric_hypersim_vits.pth \
@@ -181,6 +214,13 @@ $CLI depth --model models/depth-anything-mono-large-f32.gguf --input photo.jpg -
 # Nested metric-scale depth (two GGUFs)
 $CLI depth --model nested-anyview.gguf --metric-model nested-metric.gguf --input photo.jpg --pfm metric.pfm
 
+# Sensor-calibrated DA2/DA3 depth TIFF (build with -DDA_ENABLE_TIFF=ON).
+# depth-upscale defaults to the converted
+# yuvraj108c Depth Anything V2 ViT-B model at models/depth-anything2-base-f32.gguf.
+# The sensor input stores each 16-bit depth sample in its first two 8-bit channels
+# (high byte, low byte); pass --model to override the default.
+$CLI depth-upscale --input rgb_capture.tiff --sensor-depth sensor_depth.tiff --tiff calibrated_depth.tiff
+
 # Multi-view depth + pose
 $CLI depth --model $M --input a.jpg --input b.jpg --out-prefix scene
 
@@ -220,7 +260,7 @@ Gallery entries cover base (q4_k/q8_0/f16/f32), small, large, giant, and mono-la
 
 ## C API
 
-A flat C ABI (`include/da_capi.h`, `abi_version` 4) over `libdepthanything.so`:
+A flat C ABI (`include/da_capi.h`, `abi_version` 12) over `libdepthanything.so`:
 
 ```c
 da_ctx* ctx = da_capi_load("model.gguf", /*threads*/ 8);
@@ -234,10 +274,15 @@ da_capi_free_floats(depth);
 int n; float *xyz; unsigned char *rgb;
 da_capi_points(ctx, "photo.jpg", /*conf_thresh*/ 1.0f, &n, &xyz, &rgb);   // 3D cloud
 da_capi_export_glb(ctx, "photo.jpg", "scene.glb");
+
+// PCL projects sensor points into the main-camera grid first. The result and
+// output are caller-owned uint16 millimetre buffers of size range_h*range_w.
+da_capi_depth_upscale(ctx, "main.tiff", projected_range_mm, range_h, range_w,
+                      /*degree*/ 2, /*gaussian_sigma*/ 1.0f, dense_range_mm);
 da_capi_free(ctx);
 ```
 
-Opaque handles, C types only, `da_capi_last_error` for diagnostics. Build it with `-DDA_SHARED=ON`.
+Opaque handles, C types only, `da_capi_last_error` for diagnostics. Build it with `-DDA_SHARED=ON`; add `-DDA_ENABLE_TIFF=ON` when `image_path` can be a TIFF.
 
 ---
 

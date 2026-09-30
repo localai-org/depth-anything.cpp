@@ -1,6 +1,7 @@
 #ifndef DA_CAPI_H
 #define DA_CAPI_H
 #include <stddef.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,7 +20,8 @@ typedef struct da_ctx da_ctx;
    10: added da_capi_set_fuse_params — scene-relative TSDF voxel/truncation knobs for
       the next streamed fuse (exposed as viewer sliders).
    11: added temporal exposed-face voxel mesh generation and retrieval for streamed
-      fused scenes. */
+      fused scenes.
+   12: added sensor-calibrated DA2/DA3 range upscaling. */
 int         da_capi_abi_version(void);
 /* Set scene-relative TSDF surface-fusion knobs consumed by the NEXT
    da_capi_points_stream whose fuse flag is set. voxel_frac: voxel edge as a fraction
@@ -43,6 +45,16 @@ void        da_capi_free(da_ctx* ctx);                           /* safe on NULL
 char*       da_capi_info_json(da_ctx* ctx);
 void        da_capi_free_string(char* s);
 const char* da_capi_last_error(da_ctx* ctx);                     /* owned by ctx, "" if none */
+/* Infer DA2 or single-file DA3 depth for image_path and calibrate it against a
+   sparse projected range image. projected_range_mm and out_range_mm are caller-
+   owned [range_h*range_w] buffers. gaussian_sigma must be finite in [0, 64].
+   The output remains in calibrated millimetres; it is not normalized to the full
+   uint16 range. TIFF image input requires a build with DA_ENABLE_TIFF. Returns 0
+   or -1 on error. */
+int da_capi_depth_upscale(da_ctx* ctx, const char* image_path,
+                          const uint16_t* projected_range_mm, int range_h, int range_w,
+                          int polynomial_degree, float gaussian_sigma,
+                          uint16_t* out_range_mm);
 /* Run depth on an image file. On success writes *out_h,*out_w and returns a malloc'd
    float[H*W] depth map (row-major); caller frees via da_capi_free_floats. NULL on error. */
 float* da_capi_depth_path(da_ctx* ctx, const char* image_path, int* out_h, int* out_w);

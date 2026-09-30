@@ -1,5 +1,5 @@
 // engine.go — purego bindings to libdepthanything (the flat C API in
-// include/da_capi.h, ABI 11). No cgo: the shared library is dlopen'd once and each
+// include/da_capi.h, ABI 12). No cgo: the shared library is dlopen'd once and each
 // model is loaded as its own da_ctx. A context is NOT thread-safe (one ggml
 // backend + compute graph), so all inference is serialized by the caller.
 package main

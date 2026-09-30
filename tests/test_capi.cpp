@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <cstring>
 int main(){
-    if (da_capi_abi_version() != 11) return 1;
+    if (da_capi_abi_version() != 12) return 1;
     const char* gguf = std::getenv("DA_TEST_GGUF");
     if (!gguf) return 77;
     da_ctx* c = da_capi_load(gguf, 1);

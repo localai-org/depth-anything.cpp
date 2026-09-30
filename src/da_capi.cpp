@@ -1,5 +1,9 @@
 #include "da_capi.h"
 #include "engine.hpp"
+#include "depth_upscale.hpp"
+#ifdef DA_ENABLE_TIFF
+#include "tiff_io.hpp"
+#endif
 #include "preprocess.hpp"
 #include "image_io.hpp"
 #include "glb_export.hpp"
@@ -17,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <new>
 #include <array>
 #include <utility>
 #include <vector>
@@ -37,6 +42,15 @@ struct da_ctx {
     bool temporal_voxel_mesh_enabled = false;
     std::vector<uint8_t> temporal_voxel_mesh;
 };
+
+static void capi_set_error(da_ctx* c, const char* message) noexcept {
+    if (!c) return;
+    try {
+        c->last_error = message;
+    } catch (...) {
+        c->last_error.clear();
+    }
+}
 
 static char* dup_cstr(const std::string& s){
     char* p = (char*)std::malloc(s.size()+1);
@@ -90,7 +104,7 @@ static bool capi_run_nested(da_ctx* c, const char* image_path,
 }
 
 extern "C" {
-int da_capi_abi_version(void){ return 11; }
+int da_capi_abi_version(void){ return 12; }
 
 // Scene-relative TSDF fusion knobs applied by the NEXT da_capi_points_stream when
 // its fuse flag is set. voxel_frac = voxel edge as a fraction of the bbox diagonal
@@ -129,6 +143,71 @@ char* da_capi_info_json(da_ctx* c){
 }
 void da_capi_free_string(char* s){ std::free(s); }
 const char* da_capi_last_error(da_ctx* c){ return c ? c->last_error.c_str() : ""; }
+int da_capi_depth_upscale(da_ctx* c, const char* image_path,
+                          const uint16_t* projected_range_mm, int range_h, int range_w,
+                          int polynomial_degree, float gaussian_sigma,
+                          uint16_t* out_range_mm){
+    if (!c || !c->engine || !image_path || !projected_range_mm || !out_range_mm ||
+        range_h <= 0 || range_w <= 0){
+        capi_set_error(c, "depth_upscale: bad args");
+        return -1;
+    }
+    if (polynomial_degree < 0 || polynomial_degree > 8 ||
+        !std::isfinite(gaussian_sigma) || gaussian_sigma < 0.0f ||
+        gaussian_sigma > da::kMaxDepthUpscaleGaussianSigma) {
+        capi_set_error(c, "depth_upscale: invalid polynomial degree or Gaussian sigma");
+        return -1;
+    }
+    try {
+        da::Image image;
+        std::string path(image_path), error;
+        std::string lower = path;
+        for (char& ch : lower) ch = (char)std::tolower((unsigned char)ch);
+        const bool is_tiff = lower.size() >= 4 &&
+            (lower.compare(lower.size() - 4, 4, ".tif") == 0 ||
+             (lower.size() >= 5 && lower.compare(lower.size() - 5, 5, ".tiff") == 0));
+        if (is_tiff) {
+#ifdef DA_ENABLE_TIFF
+            if (!da::load_tiff_rgb(path, image, &error)) {
+                c->last_error = "depth_upscale: load image failed: " + error;
+                return -1;
+            }
+#else
+            c->last_error = "depth_upscale: TIFF input requires a build with -DDA_ENABLE_TIFF=ON";
+            return -1;
+#endif
+        } else if (!da::load_image_rgb(path, image)) {
+            c->last_error = "depth_upscale: load image failed";
+            return -1;
+        }
+        std::vector<float> predicted;
+        int prediction_h = 0, prediction_w = 0;
+        if (!da::predict_depth_for_upscale(*c->engine, image, predicted,
+                                           prediction_h, prediction_w, &error)){
+            c->last_error = "depth_upscale: " + error;
+            return -1;
+        }
+        const size_t count = (size_t)range_h * (size_t)range_w;
+        std::vector<uint16_t> projected(projected_range_mm, projected_range_mm + count), output;
+        da::DepthUpscaleOptions options;
+        options.degree = polynomial_degree;
+        options.gaussian_sigma = gaussian_sigma;
+        if (!da::upscale_depth_map(projected, range_h, range_w, predicted,
+                                   prediction_h, prediction_w, output, options, &error)){
+            c->last_error = "depth_upscale: " + error;
+            return -1;
+        }
+        std::memcpy(out_range_mm, output.data(), count * sizeof(uint16_t));
+        c->last_error.clear();
+        return 0;
+    } catch (const std::bad_alloc&) {
+        capi_set_error(c, "depth_upscale: allocation failed");
+        return -1;
+    } catch (...) {
+        capi_set_error(c, "depth_upscale: failed");
+        return -1;
+    }
+}
 float* da_capi_depth_path(da_ctx* c, const char* image_path, int* out_h, int* out_w){
     if (!c || !c->engine || !image_path){ if (c) c->last_error = "depth: bad args"; return nullptr; }
     std::vector<float> depth, conf; int H = 0, W = 0;

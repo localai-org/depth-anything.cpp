@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-download the curated DA3 model set for the demo app (~13 GB).
+# Pre-download the curated DA3 model set plus the DA2 depth-upscale default (~13 GB).
 # One weight per capability, not the full 31 GB of redundant quants.
 # Idempotent: skips files already present at the right size; resumes partials.
 set -uo pipefail
@@ -16,6 +16,7 @@ CURATED=(
   "relative+pose+gaussians        depth-anything-giant-f32.gguf"
   "metric+pose (anyview branch)   depth-anything-nested-anyview.gguf"
   "metric+pose (metric branch)    depth-anything-nested-metric.gguf"
+  "relative depth (upscale default) depth-anything2-base-f32.gguf"
 )
 
 echo "Downloading curated DA3 models into $DIR"

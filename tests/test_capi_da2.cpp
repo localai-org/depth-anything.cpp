@@ -4,6 +4,8 @@
 #include "da_capi.h"
 #include <cstdlib>
 #include <cstdio>
+#include <cstdint>
+#include <limits>
 #include <cmath>
 
 static bool finite_all(const float* p, int n){
@@ -22,6 +24,27 @@ int main(){
     da_ctx* c = da_capi_load(gguf, 1);
     if (!c){ std::fprintf(stderr, "da2: load failed\n"); return 1; }
 
+    const uint16_t projected_range[] = {
+        1000, 1100, 1200, 1300,
+        1150, 1250, 1350, 1450,
+        1300, 1400, 1500, 1600,
+        1450, 1550, 1650, 1750,
+    };
+    uint16_t upscaled[16] = {};
+    const int invalid_sigma = da_capi_depth_upscale(
+        c, png, projected_range, 4, 4, 1, std::numeric_limits<float>::max(), upscaled);
+    const int invalid_degree = da_capi_depth_upscale(
+        c, png, projected_range, 4, 4, 9, 0.0f, upscaled);
+    const int invalid_image = da_capi_depth_upscale(
+        c, "missing-image.jpg", projected_range, 4, 4, 1, 0.0f, upscaled);
+    const int upscale = da_capi_depth_upscale(
+        c, png, projected_range, 4, 4, 1, 0.0f, upscaled);
+    bool upscale_ok = invalid_sigma == -1 && invalid_degree == -1 && invalid_image == -1 && upscale == 0;
+    for (uint16_t value : upscaled) upscale_ok = upscale_ok && value > 0;
+    std::fprintf(stderr, "da2 upscale: invalid_sigma=%d invalid_degree=%d invalid_image=%d result=%d -> %s\n",
+                 invalid_sigma, invalid_degree, invalid_image, upscale, upscale_ok ? "OK" : "FAIL");
+
+
     int H=0, W=0, is_metric=-1; float *depth=nullptr, *conf=nullptr, *sky=nullptr;
     float ext[12], intr[9];
     int r = da_capi_depth_dense(c, png, &H, &W, &depth, &conf, &sky, ext, intr, &is_metric);
@@ -39,5 +62,5 @@ int main(){
                  rp, da_capi_last_error(c), okp?"OK":"FAIL");
 
     da_capi_free(c);
-    return (ok && okp) ? 0 : 1;
+    return (ok && okp && upscale_ok) ? 0 : 1;
 }
